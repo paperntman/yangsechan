@@ -1,0 +1,21 @@
+name: yangsechan
+version: '0.0'
+main: dotori.muuk.yangsechan.Yangsechan
+api-version: '1.21'
+authors: [ dotori_muuk ]
+
+commands:
+  # '/양세찬게임' 명령어 설정
+  양세찬게임:
+    description: 양세찬 게임을 시작합니다.
+    usage: "/양세찬게임"
+
+  # '/정답' 명령어 설정
+  정답:
+    description: 자신의 턴에 정답을 외치기 위한 신호를 보냅니다.
+    usage: "/정답"
+
+  # '/참여' 명령어 설정
+  참여:
+    description: 현재 모집 중인 양세찬 게임에 참여합니다.
+    usage: "/참여"
