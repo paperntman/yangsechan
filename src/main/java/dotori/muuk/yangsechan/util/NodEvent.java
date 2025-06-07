@@ -1,16 +1,17 @@
-package dotori.muuk.yangsechan;
+package dotori.muuk.yangsechan.util;
 
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.HandlerList;
 import org.jetbrains.annotations.NotNull;
 
-public class ShakeEvent extends Event {
+public class NodEvent extends Event {
 
+    // 모든 커스텀 이벤트에 필수적인 정적 필드와 메소드들입니다.
     private static final HandlerList handlers = new HandlerList();
     private final Player player;
 
-    public ShakeEvent(Player player) {
+    public NodEvent(Player player) {
         this.player = player;
     }
 
@@ -26,5 +27,7 @@ public class ShakeEvent extends Event {
     public @NotNull HandlerList getHandlers() {
         return handlers;
     }
-
+    public static HandlerList getHandlerList() {
+        return handlers;
+    }
 }

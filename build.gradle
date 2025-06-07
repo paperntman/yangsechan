@@ -57,3 +57,13 @@ processResources {
         expand props
     }
 }
+
+jar {
+    // 출력될 폴더를 지정합니다.
+    // '$buildDir'는 프로젝트 폴더 아래의 'build' 폴더를 가리킵니다.
+    // 예: build/libs -> build/my-plugins
+    destinationDirectory = file("C:/Users/dotor/Documents/Server/1.21.5 spigot/plugins")
+
+    // 출력될 JAR 파일의 이름을 직접 지정합니다.
+    archiveFileName = "yangsechan.jar"
+}
