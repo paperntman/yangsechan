@@ -2,17 +2,19 @@ package dotori.muuk.yangsechan.main.phase;
 
 import dotori.muuk.yangsechan.Main;
 import dotori.muuk.yangsechan.main.Game;
-import dotori.muuk.yangsechan.main.GameManager;
-import dotori.muuk.yangsechan.util.NodEvent;
-import dotori.muuk.yangsechan.util.ShakeEvent;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import dotori.muuk.yangsechan.util.NodEvent;
+import dotori.muuk.yangsechan.util.ShakeEvent;
 
-// 게임의 마지막을 장식하고 안전하게 정리하는 역할
+import java.util.List;
+import java.util.stream.Collectors;
+
 public class EndPhaseLogic implements PhaseLogic {
 
     private final Game game;
@@ -23,23 +25,51 @@ public class EndPhaseLogic implements PhaseLogic {
 
     @Override
     public void onEnter() {
-        // 1. 마지막 인사 및 결과 발표
-        Component endMessage = Component.text()
-                .append(Component.text("양세찬 게임 종료!\n", NamedTextColor.GOLD, TextDecoration.BOLD))
-                .append(Component.text("모두 수고하셨습니다!", NamedTextColor.YELLOW))
-                .build();
-        game.broadCast(endMessage);
+        // --- 최종 결과 발표 로직 강화 ---
+        List<Player> allPlayers = game.getPlayers();
+        List<Player> eliminated = game.getEliminatedPlayers();
+        List<Player> winners = allPlayers.stream()
+                .filter(p -> !eliminated.contains(p))
+                .toList();
 
-        // 2. 모든 플레이어의 UI 정리 (스코어보드, 타이틀 등)
+        String winnerNames = winners.stream().map(Player::getName).collect(Collectors.joining(", "));
+        String loserNames = eliminated.stream().map(Player::getName).collect(Collectors.joining(", "));
+
+        // --- 1. 승/패자 발표 메시지 ---
+        Component summaryMessage = Component.text()
+                .append(Component.text(">> 양세찬 게임 종료! <<\n", NamedTextColor.GOLD, TextDecoration.BOLD))
+                .append(Component.text("승자: ", NamedTextColor.GREEN)).append(Component.text(winnerNames.isEmpty() ? "없음" : winnerNames, NamedTextColor.WHITE))
+                .append(Component.text("\n패자: ", NamedTextColor.RED)).append(Component.text(loserNames.isEmpty() ? "없음" : loserNames, NamedTextColor.WHITE))
+                .build();
+
+        game.broadCast(summaryMessage);
+
+        // --- 2. 각 플레이어의 단어 공개 메시지 (새로 추가된 부분) ---
+        TextComponent.Builder wordListMessageBuilder = Component.text()
+                .append(Component.text("\n--- 최종 단어 목록 ---\n", NamedTextColor.YELLOW));
+
+        // getPlayerWordMap()을 사용하여 단어 목록을 만듭니다.
+        game.getPlayerWordMap().forEach((uuid, word) -> {
+            Player player = Bukkit.getPlayer(uuid);
+            String playerName = (player != null) ? player.getName() : "오프라인";
+
+            wordListMessageBuilder.append(Component.text(playerName, NamedTextColor.WHITE))
+                    .append(Component.text(" - ", NamedTextColor.GRAY))
+                    .append(Component.text(word, NamedTextColor.AQUA))
+                    .append(Component.newline());
+        });
+
+        game.broadCast(wordListMessageBuilder.build());
+
+
+        // --- 3. 모든 플레이어의 UI 정리 ---
         game.getPlayers().forEach(p -> {
             p.resetTitle();
             p.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
         });
 
-        // 3. 5초 후에 게임을 완전히 제거하도록 예약 (플레이어가 메시지를 읽을 시간 제공)
-        Bukkit.getScheduler().runTaskLater(Main.plugin, () -> {
-            game.getGameManager().removeGame(game);
-        }, 100L); // 5초 = 100틱
+        // --- 4. 5초 후에 게임을 완전히 제거하도록 예약 ---
+        Bukkit.getScheduler().runTaskLater(Main.plugin, () -> game.getGameManager().removeGame(game), 100L); // 5초 = 100틱
     }
 
     @Override
@@ -47,19 +77,14 @@ public class EndPhaseLogic implements PhaseLogic {
         // 이 페이즈는 게임의 마지막이므로 onExit이 호출될 일이 거의 없음
     }
 
-    // --- 이하 이벤트 핸들러들은 비워둠 ---
     @Override
     public void onChat(AsyncChatEvent event) {}
 
     @Override
-    public void onNod(NodEvent event) {
-
-    }
+    public void onNod(NodEvent event) {}
 
     @Override
-    public void onShake(ShakeEvent event) {
-
-    }
+    public void onShake(ShakeEvent event) {}
 
     @Override
     public void onAnswer(Player player) {}

@@ -45,6 +45,10 @@ public class WordSelectionPhaseLogic implements PhaseLogic, VoteResultListener {
     }
 
     private void nextPlayer() {
+        if(target != null){
+            Long discordId = game.getGameManager().getDiscordManager().getLinkManager().getDiscordId(target.getUniqueId());
+            game.getGameManager().getDiscordManager().unmutePlayer(discordId);
+        }
         target = turn.poll();
         if (target == null) {
             game.setPhase(GamePhase.MAIN_LOOP);
@@ -55,6 +59,11 @@ public class WordSelectionPhaseLogic implements PhaseLogic, VoteResultListener {
                 Title.title(
                         Component.text("당신의 단어가 정해지고 있습니다!"),
                         Component.text("다른 플레이어들이 토론 중입니다...", NamedTextColor.GRAY)));
+
+        Long discordId = game.getGameManager().getDiscordManager().getLinkManager().getDiscordId(target.getUniqueId());
+        if (discordId != null) {
+            game.getGameManager().getDiscordManager().mutePlayer(discordId);
+        }
 
         List<Player> others = new ArrayList<>(game.getPlayers());
         others.remove(target);

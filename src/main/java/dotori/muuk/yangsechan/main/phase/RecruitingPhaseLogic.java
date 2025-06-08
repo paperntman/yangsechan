@@ -48,6 +48,10 @@ public class RecruitingPhaseLogic implements PhaseLogic {
         Player player = event.getPlayer();
         Game gameJoined = game.getGameManager().getGameByPlayer(player);
         if (game.equals(gameJoined)) {
+            if (player.equals(game.getOwner())) {
+                player.sendMessage("방장은 나갈 수 없습니다!");
+                return;
+            }
             player.sendMessage("게임에서 나갔습니다!");
             game.getGameManager().removePlayerFromGame(player, game);
         }

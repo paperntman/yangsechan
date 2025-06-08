@@ -4,9 +4,9 @@ import dotori.muuk.yangsechan.main.Game;
 import dotori.muuk.yangsechan.util.NodEvent;
 import dotori.muuk.yangsechan.util.NodStatus;
 import dotori.muuk.yangsechan.util.ShakeEvent;
-import dotori.muuk.yangsechan.util.VoteScoreboardManager;
 import dotori.muuk.yangsechan.util.VoteManager;
 import dotori.muuk.yangsechan.util.VoteResultListener;
+import dotori.muuk.yangsechan.util.VoteScoreboardManager;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -16,13 +16,14 @@ import org.bukkit.entity.Player;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class MainLoopPhaseLogic implements PhaseLogic, VoteResultListener {
 
     private final Game game;
     private Queue<Player> turnQueue;
     private Player currentTarget;
-    private Collection<Player> successfulPlayers;
+    private List<Player> successfulPlayers; // 정답을 맞힌 플레이어 목록
 
     // --- 심판 모드 관련 변수 ---
     private VoteManager judgementVote;
@@ -36,8 +37,9 @@ public class MainLoopPhaseLogic implements PhaseLogic, VoteResultListener {
 
     @Override
     public void onEnter() {
+        this.successfulPlayers = new ArrayList<>();
         this.turnQueue = new LinkedList<>(game.getPlayers());
-        successfulPlayers = new ArrayList<>();
+        game.initializeAttempts(); // 모든 플레이어의 시도 횟수 초기화
         game.broadCast(Component.text("메인 게임을 시작합니다! 자신의 단어를 맞춰보세요!", NamedTextColor.AQUA));
         nextTurn();
     }
@@ -47,77 +49,102 @@ public class MainLoopPhaseLogic implements PhaseLogic, VoteResultListener {
         if (currentTarget != null) {
             currentTarget.resetTitle();
         }
-        // 이 페이즈는 게임이 끝날 때까지 유지되므로, onExit은 게임 종료 시점에 호출됨
-        game.broadCast(Component.text("모든 플레이어가 정답을 맞혔습니다! 게임 종료!", NamedTextColor.GOLD));
     }
 
     private void nextTurn() {
-        // 성공한 플레이어는 턴 큐에서 완전히 제거
-        turnQueue.removeIf(successfulPlayers::contains);
-
-        if (turnQueue.isEmpty()) {
-            game.setPhase(GamePhase.ENDED);
+        if (checkGameEndCondition()) {
             return;
         }
 
         // 다음 턴 플레이어 설정 (순환 큐)
-        this.currentTarget = turnQueue.poll();
-        turnQueue.offer(this.currentTarget);
+        do {
+            this.currentTarget = turnQueue.poll();
+            if (this.currentTarget == null) { // 큐가 비었다면 게임 종료 조건 다시 확인
+                if (checkGameEndCondition()) return;
+                // 모든 플레이어가 한 바퀴 돌았으므로 큐를 다시 채움
+                this.turnQueue = new LinkedList<>(game.getActivePlayers().stream()
+                        .filter(p -> !successfulPlayers.contains(p)).toList());
+                this.currentTarget = turnQueue.poll();
+            }
+        } while (game.isEliminated(currentTarget) || successfulPlayers.contains(currentTarget)); // 탈락했거나 성공했으면 건너뜀
 
-        // 질문 모드로 전환 및 화면 업데이트
+        turnQueue.offer(this.currentTarget);
         switchToQuestionMode();
     }
 
     /**
-     * 현재 턴의 플레이어 화면을 '질문 모드'에 맞게 업데이트합니다.
+     * 게임 종료 조건을 확인하고, 종료 조건이 충족되면 게임을 끝냅니다.
+     * @return 게임이 종료되면 true, 아니면 false
      */
+    private boolean checkGameEndCondition() {
+        List<Player> activePlayers = game.getActivePlayers().stream()
+                .filter(p -> !successfulPlayers.contains(p))
+                .toList();
+
+        if (activePlayers.size() <= 1) { // 살아남은 사람이 1명 이하일 경우
+            game.setPhase(GamePhase.ENDED);
+            return true;
+        }
+        return false;
+    }
+
     private void switchToQuestionMode() {
         this.isJudgementMode = false;
         String targetWord = game.getPlayerWord(currentTarget);
         Title.Times times = Title.Times.times(Duration.ofMillis(400), Duration.ofSeconds(10), Duration.ofMillis(800));
 
-        // TARGET에게 질문 유도
+        // TARGET에게 질문 유도 (남은 기회 표시)
+        int remainingAttempts = game.getRemainingAttempts(currentTarget);
         Component targetTitle = Component.text("당신의 차례입니다!", NamedTextColor.YELLOW);
-        Component targetSubtitle = Component.text("질문하세요! 턴을 넘기려면 고개를 끄덕이세요.", NamedTextColor.GRAY);
+        Component targetSubtitle;
+
+        if (remainingAttempts > 0) {
+            targetSubtitle = Component.text("질문하세요! (남은 기회: " + remainingAttempts + "번)\n턴을 넘기려면 고개를 끄덕이세요.", NamedTextColor.GRAY);
+        } else {
+            targetSubtitle = Component.text("기회를 모두 소진했습니다. 턴을 넘기려면 고개를 끄덕이세요.", NamedTextColor.RED);
+        }
         currentTarget.showTitle(Title.title(targetTitle, targetSubtitle, times));
 
-        // 다른 플레이어들에게 TARGET의 단어 정보 제공
-        List<Player> others = new ArrayList<>(game.getPlayers());
-        others.remove(currentTarget);
+        // 다른 '활동 중인' 플레이어들에게 정보 제공
+        List<Player> others = game.getActivePlayers().stream()
+                .filter(p -> !p.equals(currentTarget))
+                .collect(Collectors.toList());
+
         Component othersTitle = Component.text(currentTarget.getName(), NamedTextColor.GOLD, TextDecoration.BOLD).append(Component.text(" 님의 차례", NamedTextColor.WHITE));
         Component othersSubtitle = Component.text("정답: ", NamedTextColor.GRAY).append(Component.text(targetWord, NamedTextColor.AQUA));
         game.broadCastTitle(Title.title(othersTitle, othersSubtitle, times), others);
     }
 
-    /**
-     * '정답 심판 모드'를 시작합니다.
-     */
     private void startJudgementMode() {
-        synchronized (judgementLock) { // 동기화 시작
+        synchronized (judgementLock) {
             this.isJudgementMode = true;
 
-            List<Player> voters = new ArrayList<>(game.getPlayers());
-            voters.remove(currentTarget);
+            // 투표자는 탈락하지 않은 플레이어 중 본인을 제외한 모두
+            List<Player> voters = game.getActivePlayers().stream()
+                    .filter(p -> !p.equals(currentTarget))
+                    .collect(Collectors.toList());
+
+            if (voters.isEmpty()) { // 심판해줄 사람이 없으면 자동으로 오답처리
+                onVoteRejected("심판해줄 플레이어가 없습니다.");
+                return;
+            }
 
             this.judgementVote = new VoteManager(voters, this);
             this.scoreboardManager = new VoteScoreboardManager(game.getGameManager().getPlugin());
             this.scoreboardManager.createScoreboard(voters);
             this.scoreboardManager.updateScoreboard(judgementVote.getVoteStatus());
-        } // 동기화 블록 바깥에서 타이틀/메시지 전송
+        }
 
         Title.Times times = Title.Times.times(Duration.ofMillis(400), Duration.ofSeconds(15), Duration.ofMillis(800));
         Component title = Component.text("심판 시간!", NamedTextColor.RED);
         Component subtitle = Component.text(currentTarget.getName() + " 님이 정답을 외칩니다!", NamedTextColor.WHITE);
-        game.broadCastTitle(Title.title(title, subtitle, times), game.getPlayers());
+        game.broadCastTitle(Title.title(title, subtitle, times), game.getActivePlayers()); // 활동중인 플레이어에게만 타이틀 표시
 
         currentTarget.sendMessage(Component.text("정답을 마이크에 대고 외쳐주세요!", NamedTextColor.GREEN));
     }
 
-    /**
-     * 심판 모드와 관련된 모든 리소스를 정리합니다.
-     */
     private void cleanupJudgementMode() {
-        synchronized (judgementLock) { // 동기화 시작
+        synchronized (judgementLock) {
             this.isJudgementMode = false;
             if (judgementVote != null) {
                 judgementVote.cleanup();
@@ -127,17 +154,19 @@ public class MainLoopPhaseLogic implements PhaseLogic, VoteResultListener {
                 scoreboardManager.cleanup();
                 this.scoreboardManager = null;
             }
-            // 모든 플레이어의 타이틀을 초기화
-            game.getPlayers().forEach(Player::resetTitle);
-        } // 동기화 종료
+            game.getActivePlayers().forEach(Player::resetTitle);
+        }
     }
 
-    // --- 이벤트 핸들러 ---
-
-
-    //TODO 최대 정답 개수
     @Override
     public void onAnswer(Player player) {
+        if (game.isEliminated(player)) return; // 탈락자는 아무것도 할 수 없음
+
+        if (game.getRemainingAttempts(player) <= 0) {
+            player.sendMessage(Component.text("이미 모든 기회를 소진하여 정답을 외칠 수 없습니다.", NamedTextColor.RED));
+            return;
+        }
+
         if (player.equals(currentTarget) && !isJudgementMode) {
             startJudgementMode();
         } else if (!player.equals(currentTarget)) {
@@ -147,34 +176,28 @@ public class MainLoopPhaseLogic implements PhaseLogic, VoteResultListener {
 
     @Override
     public void onNod(NodEvent event) {
+        if (game.isEliminated(event.getPlayer())) return; // 탈락자는 아무것도 할 수 없음
+
         synchronized (judgementLock) {
             if (isJudgementMode && judgementVote != null) {
-                // 1. 투표를 진행합니다. 이 호출로 인해 judgementVote가 null이 될 수 있습니다.
                 judgementVote.castVote(event.getPlayer(), NodStatus.NOD);
-
-                // 2. 투표가 끝났는지 확인합니다.
-                //    투표가 계속 진행 중일 때(즉, cleanup이 호출되지 않았을 때)만 스코어보드를 업데이트합니다.
                 if (judgementVote != null && scoreboardManager != null) {
                     scoreboardManager.updateScoreboard(judgementVote.getVoteStatus());
                 }
-
-            } else if (!isJudgementMode) {
-                if (event.getPlayer().equals(currentTarget)) {
-                    event.getPlayer().sendMessage(Component.text("턴을 넘깁니다.", NamedTextColor.GRAY));
-                    nextTurn();
-                }
+            } else if (!isJudgementMode && event.getPlayer().equals(currentTarget)) {
+                event.getPlayer().sendMessage(Component.text("턴을 넘깁니다.", NamedTextColor.GRAY));
+                nextTurn();
             }
         }
     }
 
     @Override
     public void onShake(ShakeEvent event) {
+        if (game.isEliminated(event.getPlayer())) return; // 탈락자는 아무것도 할 수 없음
+
         synchronized (judgementLock) {
             if (isJudgementMode && judgementVote != null) {
-                // 1. 투표를 진행합니다.
                 judgementVote.castVote(event.getPlayer(), NodStatus.SHAKE);
-
-                // 2. 투표가 끝났는지 확인하고, 진행 중일 때만 스코어보드를 업데이트합니다.
                 if (judgementVote != null && scoreboardManager != null) {
                     scoreboardManager.updateScoreboard(judgementVote.getVoteStatus());
                 }
@@ -184,31 +207,37 @@ public class MainLoopPhaseLogic implements PhaseLogic, VoteResultListener {
 
     @Override
     public void onChat(AsyncChatEvent event) {
-        // 메인 루프에서는 특별한 채팅 로직이 필요 없음
+        // 탈락자의 채팅은 다른 탈락자와 전체 관전자에게만 보이도록 처리 가능 (선택사항)
     }
-
-    // --- VoteResultListener 구현부 ---
 
     @Override
     public void onVoteConfirmed(String reason) {
-        game.broadCast(Component.text("판정 결과: ", NamedTextColor.WHITE).append(Component.text("정답!", NamedTextColor.GREEN, TextDecoration.BOLD)));
+        game.broadCast(Component.text("판정 결과: ", NamedTextColor.WHITE).append(Component.text("정답!", NamedTextColor.GREEN, TextDecoration.BOLD)), game.getActivePlayers());
         successfulPlayers.add(currentTarget);
-
         cleanupJudgementMode();
-        nextTurn(); // 다음 턴으로
+        nextTurn();
     }
 
     @Override
     public void onVoteRejected(String reason) {
-        game.broadCast(Component.text("판정 결과: ", NamedTextColor.WHITE).append(Component.text("오답!", NamedTextColor.RED, TextDecoration.BOLD)));
-        // 오답 시에는 성공 처리 없이 턴만 넘김
+        int remaining = game.decrementAndGetAttempts(currentTarget);
+
+        game.broadCast(Component.text("판정 결과: ", NamedTextColor.WHITE).append(Component.text("오답!", NamedTextColor.RED, TextDecoration.BOLD)), game.getActivePlayers());
+
+        if (remaining > 0) {
+            currentTarget.sendMessage(Component.text("남은 기회: " + remaining + "번", NamedTextColor.YELLOW));
+        } else {
+            currentTarget.sendMessage(Component.text("모든 기회를 소진하여 게임에서 탈락했습니다.", NamedTextColor.RED));
+            game.broadCast(Component.text(currentTarget.getName() + " 님이 탈락했습니다.", NamedTextColor.GRAY), game.getActivePlayers());
+            game.eliminatePlayer(currentTarget);
+        }
 
         cleanupJudgementMode();
-        nextTurn(); // 다음 턴으로
+        nextTurn();
     }
 
     @Override
     public void onVoteStatusUpdate(String message) {
-        game.broadCast(Component.text(message, NamedTextColor.YELLOW));
+        game.broadCast(Component.text(message, NamedTextColor.YELLOW), game.getActivePlayers());
     }
 }
